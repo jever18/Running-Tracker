@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard Pelari{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12 mb-4 text-center">
+            <h1 class="text-center"><i class="fa-solid fa-gauge-high"></i> Dashboard</h1>
+            <a href="{{ url_for('web_start_run') }}" class="btn btn-lg btn-success mt-3">
+                <i class="fa-solid fa-person-running"></i> Mulai Peluang Lari Baru
+            </a>
+            <p class="text-center mt-2 text-secondary">
+                <small>Selamat datang, {{ username }}!</small>
+            </p>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-lg-7">
+            <h3><i class="fa-solid fa-history"></i> Sesi Lari Saya</h3>
+            <hr>
+            {% for run in user_runs %}
+            <div class="card shadow mb-3">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    Sesi #{{ run.run_id }} - {{ run.timestamp.split('T')[0] }}
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4 mb-2">
+                            Jarak: <strong>{{ run.distance_km|round(2) }} km</strong>
+                        </div>
+                        <div class="col-md-4 mb-2">
+                            Durasi: <strong>{{ run.duration_sec | format_duration }}</strong>
+                        </div>
+                        <div class="col-md-4 mb-2">
+                            Pace: <strong>{{ run.average_pace | format_pace }}</strong>
+                        </div>
+                    </div>
+                    <a href="{{ url_for('web_run_detail', run_id=run.run_id) }}" class="btn btn-sm btn-outline-primary mt-2">
+                        Lihat Rute & Detail
+                    </a>
+                </div>
+            </div>
+            {% else %}
+            <div class="alert alert-info text-center">Anda belum memiliki sesi lari. Mulai sesi lari baru!</div>
+            {% endfor %}
+        </div>
+        
+        <div class="col-lg-5">
+            <h3><i class="fa-solid fa-trophy"></i> Global Leaderboard (Top 5 Jarak)</h3>
+            <hr>
+            <ol class="list-group list-group-numbered">
+                {% for entry in leaderboard %}
+                <li class="list-group-item d-flex justify-content-between align-items-start">
+                    <div>
+                        <strong class="text-primary">{{ entry.username }}</strong>
+                        <br>
+                        <small>Pace Rata-rata: {{ entry.average_pace | format_pace }}</small>
+                    </div>
+                    <span class="badge bg-success rounded-pill p-2">
+                        {{ entry.distance | round(2) }} km
+                    </span>
+                </li>
+                {% else %}
+                <li class="list-group-item">Leaderboard belum terisi.</li>
+                {% endfor %}
+            </ol>
+        </div>
+    </div>
+</div>
+{% endblock %}

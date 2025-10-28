@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block title %}Detail Lari #{{ run.run_id }}{% endblock %}
+
+{% block head_extras %}
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <style>
+        #mapid {
+            height: 500px; 
+            position: relative;
+            z-index: 0; 
+	    overflow:visible !important;
+	    overflow: hidden !important;
+
+        }
+
+        .map-card {
+            overflow: hidden !important;
+        }
+    
+    </style>
+{% endblock head_extras %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <div class="card shadow p-4 map-card">  <!-- TAMBAHAN: Tambahkan class 'map-card' -->
+                <h2 class="text-center mb-4"><i class="fa-solid fa-clipboard-list"></i> Detail Sesi Lari #{{ run.run_id }}</h2>
+                <a href="{{ url_for('web_dashboard') }}" class="btn btn-sm btn-outline-secondary mb-3"><i class="fa-solid fa-arrow-left"></i> Kembali ke Dashboard</a>
+
+                <div class="p-3 mb-4 rounded" style="background-color: #f8f9fa;">
+                    <h5 class="text-primary">Ringkasan</h5>
+                    <ul class="list-unstyled">
+                        <li><i class="fa-solid fa-location-dot"></i> Jarak: <strong>{{ run.distance_km|round(2) }} km</strong></li>
+                        <li><i class="fa-solid fa-hourglass-half"></i> Durasi: <strong>{{ run.duration_sec | format_duration }}</strong></li>
+                        <li><i class="fa-solid fa-shoe-prints"></i> Langkah (Estimasi): <strong>{{ run.total_steps }}</strong></li>
+                        <li class="p-2 mt-2 rounded" style="background-color: #d1ecf1;"><i class="fa-solid fa-tachometer-alt"></i> Pace Rata-rata: <strong>{{ run.average_pace | format_pace }}</strong></li>
+                    </ul>
+                </div>
+
+                <div class="card shadow mt-4">
+                    <div class="card-header bg-light">
+                        <i class="fa-solid fa-map"></i> Peta Rute
+                    </div>
+                    <div id="mapid">
+                        <div class="alert alert-warning m-3 text-center" id="map-loading-message">
+                            Memuat Peta...
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+// {% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+    // Fungsi untuk inisialisasi peta
+    function initializeMap() {
+        console.log('Script peta dimuat. Memeriksa data...');
+
+        if (typeof L === 'undefined') {
+            console.error('Leaflet library (L) tidak dimuat.');
+            document.getElementById('mapid').innerHTML =
+                '<div class="alert alert-danger m-3 text-center">Error: Library Leaflet tidak dimuat. Cek koneksi internet.</div>';
+            return;
+        }
+
+        let routeData = [];
+        try {
+            routeData = JSON.parse('{{ run.route_data | tojson | safe }}');
+        } catch (e) {
+            console.error('Error parsing route_data:', e);
+            document.getElementById('mapid').innerHTML =
+                '<div class="alert alert-danger m-3 text-center">Error memuat data rute.</div>';
+            return;
+        }
+
+        if (!routeData || routeData.length === 0) {
+            console.warn('Tidak ada data rute yang terekam.');
+            document.getElementById('mapid').innerHTML =
+                '<div class="alert alert-warning m-3 text-center">Tidak ada data GPS rute yang terekam untuk sesi ini.</div>';
+            return;
+        }
+
+        // Hapus pesan loading
+        document.getElementById('mapid').innerHTML = ''; 
+        
+        const startCoord = [routeData[0].lat, routeData[0].lng];
+
+        try {
+            // Inisialisasi Peta dengan opsi tambahan untuk batas ukuran
+            var mymap = L.map('mapid', {
+                center: startCoord,
+                zoom: 14,
+                preferCanvas: true, // Rendering stabil
+                zoomControl: true,
+                fadeAnimation: false, // Nonaktifkan animasi fade untuk stabilitas
+                zoomAnimation: true,
+                // TAMBAHAN: Batasi zoom agar peta tidak terlalu besar
+                minZoom: 10,
+                maxZoom: 18,
+                // TAMBAHAN: Mencegah peta keluar dari container
+                maxBounds: null, // Biarkan fitBounds menangani
+                maxBoundsViscosity: 1.0
+            });
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                updateWhenIdle: false,
+                updateWhenZooming: false
+            }).addTo(mymap);
+
+            // Ikon marker (tetap sama)
+            const markerIcon = {
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+            };
+            const startIcon = L.icon({ ...markerIcon, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png' });
+            const endIcon = L.icon({ ...markerIcon, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png' });
+
+            const latLngs = routeData.map(point => [point.lat, point.lng]);
+
+            var polyline = L.polyline(latLngs, {
+                color: 'blue',
+                weight: 5,
+                opacity: 0.8
+            }).addTo(mymap);
+
+            L.marker(startCoord, { icon: startIcon }).addTo(mymap).bindPopup("Start").openPopup();
+                
+            if (routeData.length > 1) {
+                const endCoord = [routeData[routeData.length - 1].lat, routeData[routeData.length - 1].lng];
+                L.marker(endCoord, { icon: endIcon }).addTo(mymap).bindPopup("Finish");
+                mymap.fitBounds(polyline.getBounds());
+            } else {
+                mymap.panTo(startCoord);
+                mymap.setZoom(16);
+            }
+            
+            // PERBAIKAN KRITIS: Paksa redraw beberapa kali untuk memastikan tile lengkap
+            setTimeout(function() {
+                mymap.invalidateSize(true);
+                // Tambahan: Paksa redraw tile
+                mymap.eachLayer(function(layer) {
+                    if (layer instanceof L.TileLayer) {
+                        layer.redraw();
+                    }
+                });
+            }, 300);
+
+            // Listener untuk resize dan scroll
+            window.addEventListener('resize', function() {
+                mymap.invalidateSize();
+            });
+            window.addEventListener('scroll', function() {
+                mymap.invalidateSize();
+            });
+
+        } catch (e) {
+            console.error('Error inisialisasi peta:', e);
+            document.getElementById('mapid').innerHTML =
+                '<div class="alert alert-danger m-3 text-center">Error memuat peta. Cek konsol browser.</div>';
+        }
+    }
+
+    // Jalankan inisialisasi saat DOM dan window siap
+    document.addEventListener('DOMContentLoaded', function() {
+        window.addEventListener('load', function() {
+            // Tunggu sedikit lagi untuk memastikan animasi selesai
+            setTimeout(function() {
+                initializeMap();
+            }, 100);
+        });
+    });
+</script>
+{% endblock %}

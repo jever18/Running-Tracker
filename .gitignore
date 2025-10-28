@@ -1,0 +1,22 @@
+# File .gitignore
+# Flask/Python
+__pycache__/
+*.pyc
+.venv/  # Folder virtual environment Anda
+instance/
+.env
+
+# ==================================
+# KONFIGURASI REDIS DAN DATABASE
+# ==================================
+# File dump RDB (Redis Database) lokal
+dump.rdb 
+
+# File AOF (Append Only File) Redis 
+appendonly.aof 
+
+# File log Redis
+redis.log 
+
+# Database SQLite (jika ada sebagai backup/testing)
+*.db

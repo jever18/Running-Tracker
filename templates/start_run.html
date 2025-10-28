@@ -1,0 +1,396 @@
+// {% extends "base.html" %}
+
+{% block title %}Mulai Pelacakan Lari{% endblock %}
+
+{% block head_extras %}
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    
+    <style>
+        /* Pastikan container peta memiliki ukuran yang tepat dan tidak terpengaruh oleh CSS lain */
+        #map {
+            height: 400px; /* Tinggi tetap untuk memastikan peta muncul */
+            width: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        
+        /* Hapus atau komentari gaya yang mungkin mengganggu rendering ubin peta */
+        /* Gaya berikut mungkin menyebabkan gambar ubin hilang, jadi kita hapus */
+        /*
+        #map .leaflet-container img, 
+        #map .leaflet-container .leaflet-tile {
+            max-width: none !important;
+            transform: none !important;
+            -webkit-backface-visibility: hidden; 
+            backface-visibility: hidden;
+        }
+        
+        #map .leaflet-tile, #map .leaflet-layer {
+            transform: translate3d(0, 0, 0) !important;
+        }
+        */
+        
+        /* Tambahkan gaya sederhana untuk memastikan peta responsif */
+        .map-card {
+            overflow: hidden;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card shadow p-4 map-card">
+                <h2 class="text-center mb-4"><i class="fa-solid fa-person-running"></i> Mulai Pelacakan Lari</h2>
+                <div class="alert alert-secondary text-center">                                                                                                                    Halo, **{{ username if username else 'Pelari' }}**! ID Pengguna Anda: {{ user_id }}
+                </div>
+
+                <audio id="goal-sound" src="https://www.soundjay.com/buttons/beep-01a.mp3" preload="auto"></audio>
+
+                <div class="text-center mb-4">
+                    <h1 class="display-4" id="time-val">00:00:00</h1>
+                    <div class="row mt-3">
+                        <div class="col-6">
+                            <p class="h4 text-primary">Jarak (km)</p>
+                            <span class="display-5" id="distance-val">0.00</span>
+                        </div>
+                        <div class="col-6">
+                            <p class="h4 text-success">Pace Rata-rata</p>
+                            <span class="display-5" id="pace-val">--</span>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <p class="h4 text-info">Langkah (Estimasi)</p>
+                            <span class="display-5" id="steps-val">0</span>
+                        </div>
+                    </div>
+                </div>
+                <div id="status-message" class="alert alert-warning text-center">
+                    Memuat peta dan menunggu izin lokasi...
+                </div>
+
+                <div class="d-grid gap-2 d-md-block text-center mt-3">
+                    <button id="start-btn" class="btn btn-success btn-lg" onclick="startTracking()">
+                        <i class="fa-solid fa-play"></i> Mulai
+                    </button>
+                    <button id="stop-btn" class="btn btn-danger btn-lg" onclick="stopTracking()" disabled>
+                        <i class="fa-solid fa-stop"></i> Berhenti & Simpan
+                    </button>
+                </div>
+            </div>                                                                                                                                             
+            <div class="card shadow mt-4 map-card">
+                <div class="card-header bg-light">Peta Pelacakan Rute</div>
+                <div id="map" style="height: 400px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script> 
+
+<script>
+    // Konfigurasi Peta Leaflet
+    let map;
+    let polyline;
+    let marker;
+    
+    // Variabel Pelacakan
+    const USER_ID = {{ user_id }};
+    const TARGET_DISTANCE = 5.00; 
+    const goalSound = document.getElementById('goal-sound'); 
+    
+    let isTracking = false;
+    let watchID = null;
+    let routeCoordinates = []; 
+    let totalDistance = 0.0;
+    let startTime = null;
+    let intervalTimer = null;
+    let totalSteps = 0;
+    let lastPosition = null;
+    let isGoalReached = false; 
+    let alarmTimeout = null; 
+
+    // --- Inisialisasi Peta ---
+    function initMap(initialLat = 0, initialLng = 0, zoom = 2) {
+        // Pastikan container peta ada sebelum inisialisasi
+        const mapContainer = document.getElementById('map');
+        if (!mapContainer) {
+            console.error("Container peta tidak ditemukan!");
+            return;
+        }
+
+        // Jika peta sudah ada, hancurkan dan buat ulang untuk menghindari konflik
+        if (map) {
+            map.remove();
+        }
+
+        // Inisialisasi peta dengan koordinat awal
+        map = L.map('map').setView([initialLat, initialLng], zoom);
+
+        // Tambahkan tile layer (pastikan URL benar dan tidak diblokir)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 19,  // Batasi zoom maksimal
+            minZoom: 1    // Batasi zoom minimal
+        }).addTo(map);
+
+        // Tambahkan marker awal
+        marker = L.marker([initialLat, initialLng]).addTo(map)
+            .bindPopup("Lokasi Awal").openPopup();
+        
+        // Tambahkan polyline untuk rute
+        polyline = L.polyline([], {color: 'blue'}).addTo(map);
+
+        // Invalidate size setelah sedikit delay untuk memastikan rendering
+        setTimeout(() => {
+            map.invalidateSize();
+            console.log("Peta diinisialisasi dan invalidateSize dipanggil.");
+        }, 100);  // Kurangi delay untuk lebih cepat
+    }
+    
+    // ... (Fungsi lainnya tetap sama) ...
+    function checkGeolocation() {
+        if (!("geolocation" in navigator)) {
+            document.getElementById('status-message').innerHTML = '<div class="alert alert-danger">Geolocation tidak didukung di browser ini.</div>';
+            initMap();  // Inisialisasi peta default jika geolocation tidak didukung
+            return;
+        }
+        
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                const lat = pos.coords.latitude;
+                const lng = pos.coords.longitude;
+                
+                initMap(lat, lng, 16);  // Inisialisasi peta dengan lokasi pengguna
+                document.getElementById('status-message').innerHTML = '<div class="alert alert-success">Lokasi Siap. Tekan Mulai.</div>';
+                lastPosition = pos;
+                
+                try {
+                    goalSound.volume = 0.1;
+                    goalSound.play().then(() => {
+                        goalSound.pause();
+                        goalSound.currentTime = 0;
+                    }).catch(error => {
+                        console.warn("Autoplay suara diblokir. Suara akan dimainkan setelah interaksi pengguna.");
+                    });
+                } catch (e) {
+                    console.error("Gagal uji suara:", e);
+                }
+                
+            }, 
+            (err) => {
+                console.warn("Gagal mendapatkan lokasi, menggunakan peta default:", err);
+                initMap();  // Inisialisasi peta default jika gagal mendapatkan lokasi
+                document.getElementById('status-message').innerHTML = `<div class="alert alert-danger">Gagal mendapatkan lokasi. Pastikan izin lokasi diberikan. (Error: ${err.code})</div>`;
+            },
+            { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        );
+    }
+    
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371; 
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = 
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+    }
+
+    function formatTime(totalSeconds) {
+        const h = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+        const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+        const s = String(totalSeconds % 60).padStart(2, '0');
+        return `${h}:${m}:${s}`;
+    }
+
+    function calculateSteps(distanceInKm, paceInMinPerKm) {
+        return Math.floor(distanceInKm * 1300);
+    }
+
+    function updateRunStats(position) {
+        if (!isTracking) return;
+        
+        const currentLat = position.coords.latitude;
+        const currentLng = position.coords.longitude;
+        
+        if (marker && map) {
+            const newLatLng = [currentLat, currentLng];
+            marker.setLatLng(newLatLng).bindPopup("Posisi Saat Ini").openPopup();
+            map.panTo(newLatLng);
+
+            if (routeCoordinates.length === 0 || calculateDistance(routeCoordinates[routeCoordinates.length-1][0], routeCoordinates[routeCoordinates.length-1][1], currentLat, currentLng) > 0.005) {
+                routeCoordinates.push(newLatLng);
+                polyline.setLatLngs(routeCoordinates);
+            }
+        }
+        
+        if (lastPosition) {
+            const newDistance = calculateDistance(
+                lastPosition.coords.latitude, lastPosition.coords.longitude,
+                currentLat, currentLng
+            );
+            totalDistance += newDistance;
+        }
+        lastPosition = position;
+        
+        const elapsedSeconds = (Date.now() - startTime) / 1000;
+        let avgPace = 0.00;
+        
+        if (totalDistance > 0) {
+            const elapsedMinutes = elapsedSeconds / 60;
+            avgPace = elapsedMinutes / totalDistance;
+        }
+
+        totalSteps = calculateSteps(totalDistance, avgPace);
+
+        // Update UI
+        document.getElementById('distance-val').innerText = totalDistance.toFixed(2);
+        document.getElementById('pace-val').innerText = avgPace > 0 ? avgPace.toFixed(2) + ' min/km' : '--';
+        document.getElementById('steps-val').innerText = totalSteps;
+        
+        // === LOGIKA ALARM ===
+        if (totalDistance >= TARGET_DISTANCE && !isGoalReached) {
+            isGoalReached = true;
+            
+            // 1. Notifikasi Visual
+            document.getElementById('status-message').innerHTML = 
+                `<div class="alert alert-success mt-2">
+                    <i class="fa-solid fa-trophy"></i> **SELAMAT! TARGET ${TARGET_DISTANCE} KM TERCAPAI!**
+                </div>`;
+            
+            // 2. Alarm Suara (Looping selama 5 detik)
+            try {
+                goalSound.volume = 0.5;
+                goalSound.loop = true; 
+                goalSound.play();
+
+                alarmTimeout = setTimeout(() => {
+                    goalSound.pause();
+                    goalSound.currentTime = 0; 
+                    goalSound.loop = false;  
+                }, 5000); 
+
+            } catch (e) {
+                console.error("Gagal memutar suara alarm:", e);
+            }
+            
+            // 3. Getaran (Backup)
+            if ("vibrate" in navigator) {
+                navigator.vibrate([200, 100, 200, 100, 500]);
+            }
+        }
+    }
+
+    function handleError(error) {
+        console.error("Geolocation Error: ", error);
+        document.getElementById('status-message').innerHTML = `<div class="alert alert-danger">Error Pelacakan Lokasi: ${error.message}</div>`;
+    }
+
+    function startTracking() {
+        if (isTracking) return;
+        
+        isTracking = true;
+        startTime = Date.now();
+        lastPosition = null; 
+        isGoalReached = false; 
+        
+        // Reset statistik
+        totalDistance = 0.0;
+        routeCoordinates = [];
+        totalSteps = 0;
+        if (polyline) polyline.setLatLngs([]); 
+        
+        // Reset UI
+        document.getElementById('distance-val').innerText = '0.00';
+        document.getElementById('pace-val').innerText = '--';
+        document.getElementById('steps-val').innerText = '0';
+        document.getElementById('time-val').innerText = '00:00:00';
+
+        document.getElementById('status-message').innerHTML = '<div class="alert alert-info">Pelacakan Dimulai...</div>';
+        document.getElementById('start-btn').disabled = true;
+        document.getElementById('stop-btn').disabled = false;
+        
+        intervalTimer = setInterval(() => {
+            const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+            document.getElementById('time-val').innerText = formatTime(elapsedSeconds);
+        }, 1000);
+
+        watchID = navigator.geolocation.watchPosition(
+            updateRunStats, 
+            handleError, 
+            { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        );
+    }
+
+    async function stopTracking() {
+        if (!isTracking) return;
+        
+        isTracking = false;
+        
+        // Hentikan semua pelacakan
+        navigator.geolocation.clearWatch(watchID);
+        clearInterval(intervalTimer);
+        
+        // Hentikan alarm jika sedang aktif
+        if (alarmTimeout) {
+            clearTimeout(alarmTimeout);
+            goalSound.pause();
+            goalSound.currentTime = 0;
+            goalSound.loop = false;
+            alarmTimeout = null;
+        }
+
+        document.getElementById('start-btn').disabled = false;
+        document.getElementById('stop-btn').disabled = true;
+
+        const duration_sec = Math.floor((Date.now() - startTime) / 1000);
+        
+        const avgPaceText = document.getElementById('pace-val').innerText;
+        const average_pace = avgPaceText !== '--' ? parseFloat(avgPaceText) : 0.00;
+
+        document.getElementById('status-message').innerHTML = '<div class="alert alert-info">Menyimpan data sesi lari...</div>';
+
+        // Persiapan data untuk API
+        const logData = {
+            user_id: USER_ID,
+            duration_sec: duration_sec,
+            distance_km: totalDistance.toFixed(2),
+            average_pace: average_pace,
+            route_data: routeCoordinates.map(coord => ({ lat: coord[0], lng: coord[1] })),
+            total_steps: totalSteps
+        };
+
+        try {
+            const response = await fetch('/api/log_run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(logData)
+            });
+            const result = await response.json();
+
+            if (result.success && result.run_id) {
+                document.getElementById('status-message').innerHTML = `<div class="alert alert-success">Sesi Lari ID #${result.run_id} berhasil disimpan!</div>`;
+                setTimeout(() => {
+                    window.location.href = `{{ url_for('web_run_detail', run_id=0) }}`.replace('0', result.run_id);
+                }, 1500);
+            } else {
+                document.getElementById('status-message').innerHTML = `<div class="alert alert-danger">Gagal menyimpan data: ${result.message || 'Error tidak diketahui'}</div>`;
+            }
+        } catch (error) {
+            console.error('API Error:', error);
+            document.getElementById('status-message').innerHTML = `<div class="alert alert-danger">Error jaringan saat menyimpan data.</div>`;
+        }
+    }
+
+    // Pastikan DOM dimuat sebelum menjalankan checkGeolocation
+    document.addEventListener('DOMContentLoaded', () => {
+        checkGeolocation();
+    });
+</script>
+{% endblock %}
